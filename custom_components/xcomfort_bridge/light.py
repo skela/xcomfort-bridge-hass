@@ -11,12 +11,16 @@ from xcomfort.devices import LightState,Light
 from homeassistant.components.light import (ATTR_BRIGHTNESS,SUPPORT_BRIGHTNESS,LightEntity)
 
 from .hub import XComfortHub
-from .const import DOMAIN
+from .const import DOMAIN,VERBOSE
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 _LOGGER = logging.getLogger(__name__)
+
+def log(msg:str):
+	if VERBOSE:
+		_LOGGER.warning(msg)
 
 # PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
 # 	vol.Required(CONF_IP_ADDRESS): cv.string,
@@ -50,17 +54,25 @@ class HASSXComfortLight(LightEntity):
 		self._device = device
 		self._name = device.name
 		self._state = None
-		
+		self.device_id = device.device_id
+
 		self._unique_id = f"light_{DOMAIN}_{hub.identifier}-{device.device_id}"
-		self._device.state.subscribe(self._state_change)
 
-	def _state_change(self, state):
-		update = self._state is not None
+	def async_added_to_hass(self):
+		_LOGGER.warning(f"Added to hass {self._name} ")
+		if self._device.state is None:
+			_LOGGER.warning(f"State is null for {self._name}")
+		else:
+			self._device.state.subscribe(lambda state: self._state_change(state) )
+
+	def _state_change(self, state):		
 		self._state = state
+		
+		should_update = self._state is not None
 
-		_LOGGER.info(f"State changed {self._name} : {state}")
+		log(f"State changed {self._name} : {state}")
 
-		if update:
+		if should_update:
 			self.schedule_update_ha_state()
 
 	@property
@@ -112,26 +124,30 @@ class HASSXComfortLight(LightEntity):
 		return 0
 
 	async def async_turn_on(self, **kwargs):
-		"""Instruct the light to turn on."""
+		log(f"async_turn_on {self._name} : {kwargs}")
 		if ATTR_BRIGHTNESS in kwargs and self._device.dimmable:
-			# Convert Home Assistant brightness (0-255) to Abode brightness (0-99)
-			# If 100 is sent to Abode, response is 99 causing an error
-			await self._device.dimm(ceil(kwargs[ATTR_BRIGHTNESS] * 99 / 255.0))
+			br = ceil(kwargs[ATTR_BRIGHTNESS] * 99 / 255.0)
+			log(f"async_turn_on br {self._name} : {br}")
+			await self._device.dimm(br)
+			self._state.dimmvalue = br
+			self.schedule_update_ha_state()			
 			return
 
-		switch_task = self._device.switch(True)
+		switch_task = self._device.switch(True)	
+		# switch_task = self.hub.bridge.switch_device(self.device_id,True)
+		await switch_task
+
 		self._state.switch = True
 		self.schedule_update_ha_state()
 
+	async def async_turn_off(self, **kwargs):
+		log(f"async_turn_off {self._name} : {kwargs}")
+		switch_task = self._device.switch(False)
+		# switch_task = self.hub.bridge.switch_device(self.device_id,True)
 		await switch_task
 
-	async def async_turn_off(self, **kwargs):
-		"""Instruct the light to turn off."""
-		switch_task = self._device.switch(False)
 		self._state.switch = False
 		self.schedule_update_ha_state()
-
-		await switch_task
 
 	def update(self):
 		pass

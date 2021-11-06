@@ -7,3 +7,5 @@ CONF_DIMMING = "dimming"
 CONF_GATEWAYS = "gateways"
 
 PLATFORMS = ["light"]
+
+VERBOSE = True

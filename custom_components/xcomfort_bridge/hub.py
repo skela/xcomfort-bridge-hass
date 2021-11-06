@@ -5,12 +5,16 @@ import logging
 from homeassistant.config_entries import ConfigEntry
 
 from homeassistant.core import HomeAssistant
-from .const import DOMAIN
+from .const import DOMAIN,VERBOSE
 
 from xcomfort.bridge import Bridge, State
 from xcomfort.devices import Light, LightState
 
 _LOGGER = logging.getLogger(__name__)
+
+def log(msg:str):
+	if VERBOSE:
+		_LOGGER.warning(msg)
 
 class XComfortHub(object):
 
@@ -23,23 +27,20 @@ class XComfortHub(object):
 			self.identifier = ip
 		self._id = ip
 		self.devices = list()
-		_LOGGER.warning("getting event loop")
+		log("getting event loop")
 		self._loop = asyncio.get_event_loop()
 
 	def start(self):
-		_LOGGER.warning("run bridge")
-		# hass.create_task(bridge.run())
 		asyncio.create_task(self.bridge.run())
-		_LOGGER.warning("ran bridge")
 
 	async def stop(self):
 		await self.bridge.close()
 
 	async def load_devices(self):
-		_LOGGER.warning("loading devices")
+		log("loading devices")
 		devs = await self.bridge.get_devices()
 		self.devices = devs.values()
-		_LOGGER.warning(f"loaded {len(self.devices)} devices")
+		log(f"loaded {len(self.devices)} devices")
 
 	@property
 	def hub_id(self) -> str:		
@@ -58,6 +59,9 @@ class XComfortBridge(Bridge):
 
 	def __init__(self, ip_address:str, authkey:str, session = None):
 		super().__init__(ip_address, authkey, session)
+	
+	def _add_device(self, device):
+		self._devices[device.device_id] = device
 
 	def _handle_SET_ALL_DATA(self, payload):
 		
@@ -66,14 +70,21 @@ class XComfortBridge(Bridge):
 		
 		if 'devices' in payload:
 			for device in payload['devices']:
-				device_id = device['deviceId']
 				name = device['name']
 				dev_type = device["devType"]
 
 				if dev_type == 100 or dev_type == 101:
-					dimmable = device['dimmable']
+					device_id = device['deviceId']
 					state = LightState(device['switch'], device['dimmvalue'])
-					light = Light(self, device_id, name, dimmable, state)
-					self._add_device(light)
+
+					thing = self._devices.get(device_id)
+					if thing is not None:
+						log(f"updating device {device_id},{name} {state}")
+						thing.state.on_next(state)						
+					else:
+						dimmable = device['dimmable']
+						log(f"adding device {device_id},{name} {state}")
+						light = Light(self, device_id, name, dimmable, state)
+						self._add_device(light)
 				else:
-					_LOGGER.warning(f"Unknown device type {dev_type} named '{name}' - Skipped")
+					log(f"Unknown device type {dev_type} named '{name}' - Skipped")
